@@ -35,3 +35,45 @@ class PositionalEmbeddings(nn.Module):
         embeddings = time[:, None] * embeddings[None, :]
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         return embeddings
+
+class Block(nn.Module):
+    def __init__(self, dim: int, dim_out: int, groups: int = 8):
+        super(Block, self).__init__()
+        self.convolution = nn.Conv2d(dim, dim_out, 3, padding=1)
+        self.norm = nn.GroupNorm(groups, dim_out)
+        self.activation = nn.SiLU()
+
+    def forward(self, x: torch.Tensor, scale_shift: tuple = None) -> torch.Tensor:
+        x = self.convolution(x)
+        x = self.norm(x)
+
+        if scale_shift is not None:
+            scale, shift = scale_shift
+            x = x * (scale + 1) + shift
+
+        x = self.activation(x)
+        return x
+
+
+class ResnetBlock(nn.Module):
+    def __init__(self, dim: int, dim_out: int, *, time_emb_dim=None, groups: int = 8):
+        super(ResnetBlock, self).__init__()
+        self.mlp = (
+            nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, dim_out))
+            if time_emb_dim is not None
+            else None
+        )
+
+        self.block1 = Block(dim, dim_out, groups)
+        self.block2 = Block(dim_out, dim_out, groups)
+        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x: torch.Tensor, time_emb: torch.Tensor = None) -> torch.Tensor:
+        h = self.block1(x)
+
+        if self.mlp is not None and time_emb is not None:
+            time_emb = self.mlp(time_emb)
+            h = torch.unsqueeze(torch.unsqueeze(time_emb, 2), 3) + h
+
+        h = self.block2(h)
+        return h + self.res_conv(x)
