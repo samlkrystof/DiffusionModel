@@ -8,16 +8,6 @@ from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 from torch.nn import functional as F
 
-
-def num_to_groups(num: int, divisor: int) -> List[int]:
-    groups = num // divisor
-    remainder = num % divisor
-    arr = [divisor] * groups
-    if remainder > 0:
-        arr.append(remainder)
-    return arr
-
-
 class Residual(nn.Module):
     def __init__(self, function):
         super(Residual, self).__init__()
