@@ -1,12 +1,13 @@
 import math
 from functools import partial
-from typing import List, Tuple
+from typing import Tuple
 
 import torch
-from torch import nn
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
+from torch import nn
 from torch.nn import functional as F
+
 
 class Residual(nn.Module):
     def __init__(self, function):
