@@ -20,7 +20,7 @@ class Residual(nn.Module):
 
 def Downsample(dim: int, dim_out: int = None) -> nn.Module:
     return nn.Sequential(
-        Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=2, p2=2),
+        Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1=2, p2=2),
         nn.Conv2d(dim * 4, dim_out or dim, 3, padding=1)
     )
 
@@ -46,13 +46,13 @@ class PositionalEmbeddings(nn.Module):
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         return embeddings
 
-class WeightStandardizedConv2d(nn.Module):
+class WeightStandardizedConv2d(nn.Conv2d):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         eps = 1e-5 if x.dtype == torch.float32 else 1e-3
 
         weight = self.weight
         mean = reduce(weight, "o ... -> o 1 1 1", "mean")
-        var = reduce(weight, "o ... -> o 1 1 1", "var", partial(torch.var, unbiased=False))
+        var = reduce(weight, "o ... -> o 1 1 1", partial(torch.var, unbiased=False))
         normalized_weight = (weight - mean) * torch.rsqrt(var + eps)
 
         return F.conv2d(x, normalized_weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
@@ -111,8 +111,8 @@ class Attention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, c, h, w = x.shape
-        qkv = self.to_qkv(x).chunk(3, dim=-1)
-        q, k, v = map(lambda t: rearrange(t, 'b (h, c) x y -> b h c (x y)', h=self.heads), qkv)
+        qkv = self.to_qkv(x).chunk(3, dim=1)
+        q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h=self.heads), qkv)
         q = q * self.scale
 
         dots = torch.einsum('b h d i,b h d j->b h i j', q, k)
@@ -120,7 +120,7 @@ class Attention(nn.Module):
         attn = dots.softmax(dim=-1)
 
         out = torch.einsum('b h i j, b h d j-> b h i d', attn, v)
-        out = rearrange(out, 'b h (x,y) d -> b (h d) x y', x=h, y=w)
+        out = rearrange(out, 'b h (x y) d -> b (h d) x y', x=h, y=w)
         return self.to_out(out)
 
 class LinearAttention(nn.Module):
@@ -165,7 +165,7 @@ class PreNorm(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, dim: int, init_dim: int = None, out_dim: int = None, dim_mults: Tuple[int] = (1, 2, 4, 8),
+    def __init__(self, dim: int, init_dim: int = None, outer_dim: int = None, dim_mults: Tuple[int, ..., int] = (1, 2, 4, 8),
                  channels: int = 3, self_condition: bool = False, resnet_block_groups: int = 4):
         super(UNet, self).__init__()
 
@@ -173,10 +173,10 @@ class UNet(nn.Module):
         self.self_condition = self_condition
         input_channels = channels * (2 if self_condition else 1)
 
-        init_dim = init_dim or dim
-        self.input_conv = nn.Conv2d(input_channels, init_dim, 1, padding=0)
+        initial_dim = init_dim or dim
+        self.input_conv = nn.Conv2d(input_channels, initial_dim, 1, padding=0)
 
-        dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
+        dims = [initial_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
         block_class = partial(ResnetBlock, groups=resnet_block_groups)
@@ -223,7 +223,7 @@ class UNet(nn.Module):
                 else nn.Conv2d(out_dim, in_dim, 3, padding=1)
             ]))
 
-        self.out_dim = out_dim or channels
+        self.out_dim = outer_dim or channels
         self.end_res_block = block_class(dim * 2, dim, time_emb_dim=time_dim)
         self.end_conv = nn.Conv2d(dim, self.out_dim, 1)
 
