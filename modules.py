@@ -80,22 +80,23 @@ class ResnetBlock(nn.Module):
     def __init__(self, dim: int, dim_out: int, *, time_emb_dim=None, groups: int = 8):
         super(ResnetBlock, self).__init__()
         self.mlp = (
-            nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, dim_out))
+            nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, dim_out * 2))
             if time_emb_dim is not None
             else None
         )
 
-        self.block1 = Block(dim, dim_out, groups)
-        self.block2 = Block(dim_out, dim_out, groups)
+        self.block1 = Block(dim, dim_out, groups=groups)
+        self.block2 = Block(dim_out, dim_out, groups=groups)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x: torch.Tensor, time_emb: torch.Tensor = None) -> torch.Tensor:
-        h = self.block1(x)
 
         if self.mlp is not None and time_emb is not None:
             time_emb = self.mlp(time_emb)
-            h = torch.unsqueeze(torch.unsqueeze(time_emb, 2), 3) + h
+            time_emb = rearrange(time_emb, "b c -> b c 1 1")
+            scale_shift = time_emb.chunk(2, dim=1)
 
+        h = self.block1(x, scale_shift=scale_shift)
         h = self.block2(h)
         return h + self.res_conv(x)
 
@@ -165,7 +166,7 @@ class PreNorm(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, dim: int, init_dim: int = None, outer_dim: int = None, dim_mults: Tuple[int, ..., int] = (1, 2, 4, 8),
+    def __init__(self, dim: int, init_dim: int = None, outer_dim: int = None, dim_mults: Tuple[int, ...] = (1, 2, 4, 8),
                  channels: int = 3, self_condition: bool = False, resnet_block_groups: int = 4):
         super(UNet, self).__init__()
 
