@@ -46,6 +46,7 @@ class PositionalEmbeddings(nn.Module):
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         return embeddings
 
+
 class WeightStandardizedConv2d(nn.Conv2d):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         eps = 1e-5 if x.dtype == torch.float32 else 1e-3
@@ -56,6 +57,7 @@ class WeightStandardizedConv2d(nn.Conv2d):
         normalized_weight = (weight - mean) * torch.rsqrt(var + eps)
 
         return F.conv2d(x, normalized_weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+
 
 class Block(nn.Module):
     def __init__(self, dim: int, dim_out: int, groups: int = 8):
@@ -90,7 +92,6 @@ class ResnetBlock(nn.Module):
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x: torch.Tensor, time_emb: torch.Tensor = None) -> torch.Tensor:
-
         if self.mlp is not None and time_emb is not None:
             time_emb = self.mlp(time_emb)
             time_emb = rearrange(time_emb, "b c -> b c 1 1")
@@ -99,6 +100,7 @@ class ResnetBlock(nn.Module):
         h = self.block1(x, scale_shift=scale_shift)
         h = self.block2(h)
         return h + self.res_conv(x)
+
 
 class Attention(nn.Module):
     def __init__(self, dim: int, heads: int = 4, dim_head: int = 32):
@@ -123,6 +125,7 @@ class Attention(nn.Module):
         out = torch.einsum('b h i j, b h d j-> b h i d', attn, v)
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x=h, y=w)
         return self.to_out(out)
+
 
 class LinearAttention(nn.Module):
     def __init__(self, dim: int, heads: int = 4, dim_head: int = 32):
@@ -153,6 +156,7 @@ class LinearAttention(nn.Module):
         out = torch.einsum("b h d e, b h d n -> b h e n", context, q)
         out = rearrange(out, "b h c (x y) -> b (h c) x y", h=self.heads, x=h, y=w)
         return self.to_out(out)
+
 
 class PreNorm(nn.Module):
     def __init__(self, dim: int, function):
@@ -228,7 +232,6 @@ class UNet(nn.Module):
         self.end_res_block = block_class(dim * 2, dim, time_emb_dim=time_dim)
         self.end_conv = nn.Conv2d(dim, self.out_dim, 1)
 
-
     def forward(self, x: torch.Tensor, time: torch.Tensor, x_self_cond: torch.Tensor = None) -> torch.Tensor:
         if self.self_condition:
             x_self_cond = x_self_cond or torch.zeros_like(x)
@@ -259,7 +262,7 @@ class UNet(nn.Module):
             x = torch.cat((x, residuals.pop()), dim=1)
             x = block1(x, time_transformed)
 
-            x = torch.cat((x, residuals.pop()), dim = 1)
+            x = torch.cat((x, residuals.pop()), dim=1)
             x = block2(x, time_transformed)
             x = attention(x)
             x = upsample(x)
